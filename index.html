@@ -136,8 +136,9 @@ async function runOne(label, url) {
     return res;
   }
   if (r.aborted) {
-    res.verdict = "NO ANSWER in " + (TIMEOUT_MS / 1000) + " seconds - the scale is not reachable from this device";
-    res.lines.push("Check Step 1. If Step 1 also fails, check Wi-Fi and the address.");
+    res.verdict = "NO ANSWER in " + (TIMEOUT_MS / 1000) + " seconds - the request hung";
+    res.lines.push("If Step 1 also fails, check Wi-Fi and the address.");
+    res.lines.push("If Step 1 shows the weight, the browser is holding or dropping the request. Look for a permission prompt (local network access) or a preflight (OPTIONS) request the scale never answers. DevTools > Network shows which.");
     return res;
   }
   const p = await tryFetch(url, "no-cors");
@@ -180,6 +181,7 @@ function renderResults(results) {
     "Device: " + navigator.userAgent,
     ""
   ];
+  if (location.protocol === "file:") lines.splice(5, 0, "Note: page was opened from a file, not from the web, so results can differ.");
   results.forEach(r => {
     lines.push(r.label + ": " + r.verdict);
     lines.push("  URL: " + r.url);
@@ -211,6 +213,7 @@ $("run").addEventListener("click", async () => {
   try {
     if (httpUrl) results.push(await runOne("Test A (plain HTTP to the scale)", httpUrl));
     if (httpsUrl) results.push(await runOne("Test B (HTTPS)", httpsUrl));
+    else if ($("https").value.trim()) results.push({ label: "Test B (HTTPS)", url: $("https").value.trim(), lines: [], cls: "warn", verdict: "SKIPPED - needs a full address starting with https://" });
     renderResults(results);
   } finally {
     btn.disabled = false;
