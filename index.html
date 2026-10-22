@@ -42,8 +42,11 @@ textarea{width:100%;min-height:260px;font:13px/1.4 ui-monospace,Menlo,Consolas,m
 <div class="card">
 <h2>Step 2 &ndash; Run the browser test</h2>
 <p>This page now tries to read the same weight itself, the way a web application would.</p>
-<label for="https">HTTPS address (optional, for a second test)</label>
+<details>
+<summary class="muted">Advanced: also test an HTTPS address (not needed for the first test)</summary>
+<label for="https">HTTPS address</label>
 <input id="https" inputmode="url" autocapitalize="off" autocorrect="off" placeholder="https://scale-01.example.com/scale.cgi?scale=1">
+</details>
 <button id="run" type="button">Run test</button>
 </div>
 
