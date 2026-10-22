@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scale Connection Test</title>
+<style>
+:root{color-scheme:light dark;--bg:#fff;--fg:#1a1a1a;--muted:#5a5a5a;--card:#f3f4f6;--line:#d0d4da;--ok:#0a7a33;--bad:#b3261e;--warn:#8a5a00;--btn:#0b5cad;--btnfg:#fff}
+@media (prefers-color-scheme:dark){:root{--bg:#14161a;--fg:#eceff3;--muted:#a3abb7;--card:#1e2229;--line:#363c46;--ok:#4cd07d;--bad:#ff8a80;--warn:#f0b955;--btn:#4a9eff;--btnfg:#06101c}}
+*{box-sizing:border-box}
+body{margin:0;padding:16px;background:var(--bg);color:var(--fg);font:17px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+main{max-width:640px;margin:0 auto}
+h1{font-size:1.5rem;margin:0 0 4px}
+h2{font-size:1.1rem;margin:0 0 8px}
+p{margin:0 0 10px}
+.muted{color:var(--muted);font-size:.92rem}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px;margin:14px 0}
+label{display:block;font-weight:600;margin:10px 0 4px}
+input{width:100%;font:inherit;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg)}
+button,a.btn{display:inline-block;font:inherit;font-weight:600;padding:12px 18px;margin:8px 8px 0 0;border:0;border-radius:8px;background:var(--btn);color:var(--btnfg);text-decoration:none;cursor:pointer}
+button.alt,a.btn.alt{background:transparent;color:var(--btn);border:1px solid var(--btn)}
+textarea{width:100%;min-height:260px;font:13px/1.4 ui-monospace,Menlo,Consolas,monospace;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg)}
+.verdict{font-weight:700;margin:6px 0}
+.ok{color:var(--ok)}.bad{color:var(--bad)}.warn{color:var(--warn)}
+</style>
+</head>
+<body>
+<main>
+<h1>Scale Connection Test</h1>
+<p class="muted">Checks whether this tablet's browser can read a weight from a scale on the local network. Nothing is sent anywhere unless you tap the email button.</p>
+
+<div class="card">
+<h2>Step 1 &ndash; Check the scale directly</h2>
+<p>Enter the scale's address and number, then open the link. You should see text like <code>{"gross":"2040",...}</code>. If you do not, the problem is the network or the scale, not the browser.</p>
+<label for="addr">Scale address (IP or name)</label>
+<input id="addr" inputmode="url" autocapitalize="off" autocorrect="off" placeholder="192.168.1.50">
+<label for="num">Scale number</label>
+<input id="num" inputmode="numeric" value="1">
+<a id="direct" class="btn alt" target="_blank" rel="noopener" href="#">Open the scale directly</a>
+</div>
+
+<div class="card">
+<h2>Step 2 &ndash; Run the browser test</h2>
+<p>This page now tries to read the same weight itself, the way a web application would.</p>
+<label for="https">HTTPS address (optional, for a second test)</label>
+<input id="https" inputmode="url" autocapitalize="off" autocorrect="off" placeholder="https://scale-01.example.com/scale.cgi?scale=1">
+<button id="run" type="button">Run test</button>
+</div>
+
+<div class="card" id="out" hidden>
+<h2>Results</h2>
+<div id="verdicts"></div>
+<textarea id="report" readonly></textarea>
+<button id="copy" type="button">Copy results</button>
+<a id="mail" class="btn alt" href="#" hidden>Email results</a>
+<p class="muted" id="note"></p>
+</div>
+</main>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const params = new URLSearchParams(location.search);
+const TIMEOUT_MS = 8000;
+
+function cleanHost(s) {
+  s = (s || "").trim().replace(/^https?:\/\//i, "").replace(/[\/?#].*$/, "");
+  return /^[A-Za-z0-9._:\-\[\]]+$/.test(s) ? s : "";
+}
+function cleanNum(s) { return /^\d{1,3}$/.test((s || "").trim()) ? s.trim() : "1"; }
+function cleanEmail(s) { return /^[^\s@<>"]+@[^\s@<>"]+\.[^\s@<>"]+$/.test(s || "") ? s : ""; }
+function cleanHttps(s) {
+  try { const u = new URL((s || "").trim()); return u.protocol === "https:" ? u.href : ""; } catch (e) { return ""; }
+}
+
+$("addr").value = cleanHost(params.get("ip"));
+$("num").value = cleanNum(params.get("n") || "1");
+$("https").value = cleanHttps(params.get("https"));
+const mailTo = cleanEmail(params.get("to"));
+
+function scaleUrl() {
+  const h = cleanHost($("addr").value);
+  return h ? "http://" + h + "/scale.cgi?scale=" + cleanNum($("num").value) : "";
+}
+function refreshDirect() {
+  const u = scaleUrl();
+  $("direct").href = u || "#";
+  $("direct").style.opacity = u ? "1" : ".5";
+}
+$("addr").addEventListener("input", refreshDirect);
+$("num").addEventListener("input", refreshDirect);
+refreshDirect();
+
+async function tryFetch(url, mode) {
+  const c = new AbortController();
+  const timer = setTimeout(() => c.abort(), TIMEOUT_MS);
+  const t0 = performance.now();
+  try {
+    const r = await fetch(url, { mode: mode, cache: "no-store", signal: c.signal });
+    clearTimeout(timer);
+    const ms = Math.round(performance.now() - t0);
+    if (mode === "no-cors") return { ok: true, ms: ms, opaque: true };
+    const text = await r.text();
+    return { ok: r.ok, status: r.status, ms: ms, text: text };
+  } catch (e) {
+    clearTimeout(timer);
+    return { ok: false, ms: Math.round(performance.now() - t0), aborted: e && e.name === "AbortError", err: String((e && e.message) || e) };
+  }
+}
+
+function summarize(text) {
+  try {
+    const j = JSON.parse(text);
+    return "gross=" + j.gross + " net=" + j.net + " tare=" + j.tare + " units=" + j.unitsStr + " motion=" + j.motion;
+  } catch (e) {
+    return "(reply was not JSON) " + String(text).slice(0, 120);
+  }
+}
+
+async function runOne(label, url) {
+  const pageIsHttps = location.protocol === "https:";
+  const isHttpTarget = url.startsWith("http:");
+  const r = await tryFetch(url, "cors");
+  const res = { label: label, url: url, lines: [], cls: "bad", verdict: "" };
+  if (r.ok) {
+    res.cls = "ok";
+    res.verdict = "PASS - the browser read the weight";
+    res.lines.push("HTTP " + r.status + " in " + r.ms + " ms");
+    res.lines.push(summarize(r.text));
+    return res;
+  }
+  if (r.status) {
+    res.verdict = "The scale answered with HTTP " + r.status + " (not a browser problem)";
+    res.lines.push("Reply took " + r.ms + " ms");
+    res.cls = "warn";
+    return res;
+  }
+  if (r.aborted) {
+    res.verdict = "NO ANSWER in " + (TIMEOUT_MS / 1000) + " seconds - the scale is not reachable from this device";
+    res.lines.push("Check Step 1. If Step 1 also fails, check Wi-Fi and the address.");
+    return res;
+  }
+  const p = await tryFetch(url, "no-cors");
+  if (p.ok) {
+    res.cls = "warn";
+    res.verdict = "REACHED, BUT BLOCKED BY CORS - the scale answered but did not allow this page to read it";
+    res.lines.push("The scale needs to send an Access-Control-Allow-Origin header, or a proxy must add it.");
+    res.lines.push("Request took " + p.ms + " ms");
+    return res;
+  }
+  res.lines.push("Failed after " + r.ms + " ms (" + r.err + ")");
+  if (pageIsHttps && isHttpTarget) {
+    res.verdict = "BLOCKED OR UNREACHABLE - most likely the browser's insecure-content (mixed content) block";
+    res.lines.push("This page is HTTPS and the scale address is plain HTTP. If Step 1 showed the weight, the browser is blocking the call.");
+  } else if (!isHttpTarget) {
+    res.verdict = "FAILED - the secure connection could not be made";
+    res.lines.push("Common causes: certificate not trusted by this device, name does not resolve, or the device is not reachable.");
+  } else {
+    res.verdict = "FAILED - could not reach the scale from this page";
+    res.lines.push("This page is not HTTPS, so insecure-content blocking does not apply. Check Step 1, the address and the network.");
+  }
+  return res;
+}
+
+function renderResults(results) {
+  const box = $("verdicts");
+  box.textContent = "";
+  results.forEach(r => {
+    const d = document.createElement("div");
+    d.className = "verdict " + r.cls;
+    d.textContent = r.label + ": " + r.verdict;
+    box.appendChild(d);
+  });
+  const stamp = new Date().toString();
+  const lines = [
+    "Scale connection test",
+    "Time: " + stamp,
+    "Page: " + location.origin + location.pathname,
+    "Page protocol: " + location.protocol,
+    "Device: " + navigator.userAgent,
+    ""
+  ];
+  results.forEach(r => {
+    lines.push(r.label + ": " + r.verdict);
+    lines.push("  URL: " + r.url);
+    r.lines.forEach(l => lines.push("  " + l));
+    lines.push("");
+  });
+  const text = lines.join("\n");
+  $("report").value = text;
+  $("out").hidden = false;
+  if (mailTo) {
+    const m = $("mail");
+    m.href = "mailto:" + mailTo + "?subject=" + encodeURIComponent("Scale connection test results") + "&body=" + encodeURIComponent(text);
+    m.hidden = false;
+    $("note").textContent = "Tapping Email results opens your email app with the results filled in. You choose whether to send.";
+  } else {
+    $("note").textContent = "Tap Copy results and paste them into an email, or send a screenshot.";
+  }
+  $("out").scrollIntoView({ behavior: "smooth" });
+}
+
+$("run").addEventListener("click", async () => {
+  const btn = $("run");
+  const httpUrl = scaleUrl();
+  const httpsUrl = cleanHttps($("https").value);
+  if (!httpUrl && !httpsUrl) { alert("Enter the scale address in Step 1, or an HTTPS address."); return; }
+  btn.disabled = true;
+  btn.textContent = "Testing...";
+  const results = [];
+  try {
+    if (httpUrl) results.push(await runOne("Test A (plain HTTP to the scale)", httpUrl));
+    if (httpsUrl) results.push(await runOne("Test B (HTTPS)", httpsUrl));
+    renderResults(results);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Run test";
+  }
+});
+
+$("copy").addEventListener("click", async () => {
+  const t = $("report");
+  try { await navigator.clipboard.writeText(t.value); $("copy").textContent = "Copied"; }
+  catch (e) { t.focus(); t.select(); $("copy").textContent = "Selected - tap Copy in the menu"; }
+  setTimeout(() => { $("copy").textContent = "Copy results"; }, 2500);
+});
+</script>
+</body>
+</html>
